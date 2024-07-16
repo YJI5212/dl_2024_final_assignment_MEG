@@ -6,11 +6,7 @@ from einops.layers.torch import Rearrange
 
 class BasicConvClassifier(nn.Module):
     def __init__(
-        self,
-        num_classes: int,
-        seq_len: int,
-        in_channels: int,
-        hid_dim: int = 128
+        self, num_classes: int, seq_len: int, in_channels: int, hid_dim: int = 128
     ) -> None:
         super().__init__()
 
@@ -46,14 +42,14 @@ class ConvBlock(nn.Module):
         p_drop: float = 0.1,
     ) -> None:
         super().__init__()
-        
+
         self.in_dim = in_dim
         self.out_dim = out_dim
 
         self.conv0 = nn.Conv1d(in_dim, out_dim, kernel_size, padding="same")
         self.conv1 = nn.Conv1d(out_dim, out_dim, kernel_size, padding="same")
         # self.conv2 = nn.Conv1d(out_dim, out_dim, kernel_size) # , padding="same")
-        
+
         self.batchnorm0 = nn.BatchNorm1d(num_features=out_dim)
         self.batchnorm1 = nn.BatchNorm1d(num_features=out_dim)
 
@@ -74,3 +70,22 @@ class ConvBlock(nn.Module):
         # X = F.glu(X, dim=-2)
 
         return self.dropout(X)
+
+
+if __name__ == "__main__":
+    from torchinfo import summary
+
+    # モデルのインスタンスを作成
+    num_classes = 1854
+    seq_len = 281
+    in_channels = 271
+    model = BasicConvClassifier(
+        num_classes=num_classes, seq_len=seq_len, in_channels=in_channels
+    )
+
+    # デバイスの設定
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+
+    # モデル構造の表示
+    summary(model, (1, in_channels, seq_len), device=device.type)
