@@ -13,6 +13,23 @@ from src.datasets import ThingsMEGDataset
 from src.models import BasicConvClassifier
 from src.utils import set_seed
 
+from src.preprocess_funcs import (
+    notch_filter,
+    resample,
+    scale_data,
+    normalize_data,
+    decimate_data,
+)
+from src.models_01 import EnsembleModel
+from src.models_03 import LightEnsembleModel
+from src.models_04 import BasicGRUClassifier
+from src.models_05 import BasicGRUClassifier
+from src.models_06 import WaveNet
+from src.models_07 import MEG_RPSnet
+from src.models_08 import ImprovedMEG_RPSnet
+from src.models_09 import ImprovedBasicConvClassifier
+from src.models_10 import ImprovedBasicConvClassifier
+
 
 @hydra.main(version_base=None, config_path="configs", config_name="config")
 def run(args: DictConfig):
@@ -27,11 +44,19 @@ def run(args: DictConfig):
     # ------------------
     loader_args = {"batch_size": args.batch_size, "num_workers": args.num_workers}
 
-    train_set = ThingsMEGDataset("train", args.data_dir)
+    preprocessing_steps = [
+        # lambda x: notch_filter(x, sfreq=200, freqs=np.arange(50, 201, 50)),
+        # lambda x: resample(x, sfreq=200, new_sfreq=100),
+        # lambda x: scale_data(x),
+        lambda x: normalize_data(x),
+        # lambda x: decimate_data(x, sfreq=200, decim_factor=2),
+    ]
+
+    train_set = ThingsMEGDataset("train", args.data_dir, preprocessing_steps)
     train_loader = torch.utils.data.DataLoader(train_set, shuffle=True, **loader_args)
-    val_set = ThingsMEGDataset("val", args.data_dir)
+    val_set = ThingsMEGDataset("val", args.data_dir, preprocessing_steps)
     val_loader = torch.utils.data.DataLoader(val_set, shuffle=False, **loader_args)
-    test_set = ThingsMEGDataset("test", args.data_dir)
+    test_set = ThingsMEGDataset("test", args.data_dir, preprocessing_steps)
     test_loader = torch.utils.data.DataLoader(
         test_set,
         shuffle=False,
@@ -45,11 +70,21 @@ def run(args: DictConfig):
     model = BasicConvClassifier(
         train_set.num_classes, train_set.seq_len, train_set.num_channels
     ).to(args.device)
+    """ model = ImprovedBasicConvClassifier(
+        train_set.num_classes, train_set.seq_len, train_set.num_channels
+    ).to(args.device) """
 
     # ------------------
     #     Optimizer
     # ------------------
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=args.lr, weight_decay=args.weight_decay
+    )
+
+    # --------------------------------
+    #     Scaler for Mixed Precision
+    # --------------------------------
+    scaler = torch.cuda.amp.GradScaler()
 
     # ------------------
     #   Start training
@@ -68,27 +103,39 @@ def run(args: DictConfig):
         for X, y, subject_idxs in tqdm(train_loader, desc="Train"):
             X, y = X.to(args.device), y.to(args.device)
 
-            y_pred = model(X)
-
-            loss = F.cross_entropy(y_pred, y)
-            train_loss.append(loss.item())
-
             optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
 
+            with torch.cuda.amp.autocast():
+                y_pred = model(X)
+                loss = F.cross_entropy(y_pred, y)
+
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+
+            """ optimizer.zero_grad()
+            loss.backward()
+            optimizer.step() """
+
+            train_loss.append(loss.item())
             acc = accuracy(y_pred, y)
             train_acc.append(acc.item())
+
+            del X, y, y_pred, loss, acc
+            torch.cuda.empty_cache()
 
         model.eval()
         for X, y, subject_idxs in tqdm(val_loader, desc="Validation"):
             X, y = X.to(args.device), y.to(args.device)
 
-            with torch.no_grad():
+            with torch.no_grad(), torch.cuda.amp.autocast():
                 y_pred = model(X)
 
-            val_loss.append(F.cross_entropy(y_pred, y).item())
-            val_acc.append(accuracy(y_pred, y).item())
+                val_loss.append(F.cross_entropy(y_pred, y).item())
+                val_acc.append(accuracy(y_pred, y).item())
+
+            del X, y, y_pred
+            torch.cuda.empty_cache()
 
         print(
             f"Epoch {epoch+1}/{args.epochs} | train loss: {np.mean(train_loss):.3f} | train acc: {np.mean(train_acc):.3f} | val loss: {np.mean(val_loss):.3f} | val acc: {np.mean(val_acc):.3f}"

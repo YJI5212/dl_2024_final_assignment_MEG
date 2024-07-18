@@ -1,6 +1,7 @@
 batch_size: 128
-epochs: 80
+epochs: 15
 lr: 0.001
+weight_decay: 0.01
 
 device: cuda:0
 num_workers: 4
@@ -10,4 +11,4 @@ use_wandb: False
 data_dir: data
 
 # Evaluation
-model_path: 
+model_path: outputs/2024-07-17/11-30-33/model_best.pt

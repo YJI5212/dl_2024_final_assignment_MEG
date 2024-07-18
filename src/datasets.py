@@ -4,10 +4,16 @@ import torch
 from typing import Tuple
 from termcolor import cprint
 from glob import glob
+from typing import List, Callable
 
 
 class ThingsMEGDataset(torch.utils.data.Dataset):
-    def __init__(self, split: str, data_dir: str = "data") -> None:
+    def __init__(
+        self,
+        split: str,
+        data_dir: str = "data",
+        preprocessing_steps: List[Callable] = None,
+    ) -> None:
         super().__init__()
         assert split in ["train", "val", "test"], f"Invalid split: {split}"
 
@@ -15,6 +21,9 @@ class ThingsMEGDataset(torch.utils.data.Dataset):
         self.data_dir = data_dir
         self.num_classes = 1854
         self.num_samples = len(glob(os.path.join(data_dir, f"{split}_X", "*.npy")))
+        self.preprocessing_steps = (
+            preprocessing_steps if preprocessing_steps is not None else []
+        )
 
     def __len__(self) -> int:
         return self.num_samples
@@ -23,7 +32,12 @@ class ThingsMEGDataset(torch.utils.data.Dataset):
         X_path = os.path.join(
             self.data_dir, f"{self.split}_X", str(i).zfill(5) + ".npy"
         )
-        X = torch.from_numpy(np.load(X_path))
+        X = np.load(X_path)
+
+        for step in self.preprocessing_steps:
+            X = step(X)
+
+        X = torch.from_numpy(X)
 
         subject_idx_path = os.path.join(
             self.data_dir, f"{self.split}_subject_idxs", str(i).zfill(5) + ".npy"

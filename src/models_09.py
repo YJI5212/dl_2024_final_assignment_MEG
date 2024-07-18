@@ -1,0 +1,75 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from einops.layers.torch import Rearrange
+
+
+class ImprovedBasicConvClassifier(nn.Module):
+    def __init__(
+        self, num_classes: int, seq_len: int, in_channels: int, hid_dim: int = 128
+    ) -> None:
+        super().__init__()
+
+        self.blocks = nn.Sequential(
+            ConvBlock(in_channels, hid_dim),
+            ConvBlock(hid_dim, hid_dim),
+        )
+
+        self.head = nn.Sequential(
+            nn.AdaptiveAvgPool1d(1),
+            Rearrange("b d 1 -> b d"),
+            nn.Linear(hid_dim, 512),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(512, num_classes),
+        )
+
+    def forward(self, X: torch.Tensor) -> torch.Tensor:
+        X = self.blocks(X)
+        return self.head(X)
+
+
+class ConvBlock(nn.Module):
+    def __init__(
+        self, in_dim, out_dim, kernel_size: int = 3, p_drop: float = 0.1
+    ) -> None:
+        super().__init__()
+
+        self.conv0 = nn.Conv1d(in_dim, out_dim, kernel_size, padding="same")
+        self.conv1 = nn.Conv1d(out_dim, out_dim, kernel_size, padding="same")
+        self.batchnorm0 = nn.BatchNorm1d(num_features=out_dim)
+        self.batchnorm1 = nn.BatchNorm1d(num_features=out_dim)
+        self.dropout = nn.Dropout(p_drop)
+
+    def forward(self, X: torch.Tensor) -> torch.Tensor:
+        X = self.conv0(X)
+        X = F.gelu(self.batchnorm0(X))
+        X = self.conv1(X) + X  # skip connection
+        X = F.gelu(self.batchnorm1(X))
+        return self.dropout(X)
+
+
+if __name__ == "__main__":
+    from torchinfo import summary
+
+    # モデルのインスタンスを作成
+    num_classes = 1854
+    seq_len = 281
+    in_channels = 271
+    model = ImprovedBasicConvClassifier(
+        num_classes=num_classes, seq_len=seq_len, in_channels=in_channels
+    )
+
+    # デバイスの設定
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+
+    # モデル構造の表示
+    summary(model, (1, in_channels, seq_len), device=device.type)
+
+    # ダミーデータでのフォワードパス
+    dummy_data = torch.randn(
+        1, in_channels, seq_len
+    )  # バッチサイズ1、in_channels、seq_len
+    output = model(dummy_data)
+    print(output)

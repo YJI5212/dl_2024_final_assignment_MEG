@@ -13,37 +13,43 @@ from src.datasets import ThingsMEGDataset
 from src.models import BasicConvClassifier
 from src.utils import set_seed
 
+from src.models_03 import LightEnsembleModel
+
 
 @torch.no_grad()
 @hydra.main(version_base=None, config_path="configs", config_name="config")
 def run(args: DictConfig):
     set_seed(args.seed)
     savedir = os.path.dirname(args.model_path)
-    
+
     # ------------------
     #    Dataloader
-    # ------------------    
+    # ------------------
     test_set = ThingsMEGDataset("test", args.data_dir)
     test_loader = torch.utils.data.DataLoader(
-        test_set, shuffle=False, batch_size=args.batch_size, num_workers=args.num_workers
+        test_set,
+        shuffle=False,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
     )
 
     # ------------------
     #       Model
     # ------------------
-    model = BasicConvClassifier(
+    """ model = BasicConvClassifier(
         test_set.num_classes, test_set.seq_len, test_set.num_channels
-    ).to(args.device)
+    ).to(args.device) """
+    model = LightEnsembleModel(test_set.num_classes).to(args.device)
     model.load_state_dict(torch.load(args.model_path, map_location=args.device))
 
     # ------------------
     #  Start evaluation
-    # ------------------ 
-    preds = [] 
+    # ------------------
+    preds = []
     model.eval()
-    for X, subject_idxs in tqdm(test_loader, desc="Validation"):        
+    for X, subject_idxs in tqdm(test_loader, desc="Validation"):
         preds.append(model(X.to(args.device)).detach().cpu())
-        
+
     preds = torch.cat(preds, dim=0).numpy()
     np.save(os.path.join(savedir, "submission"), preds)
     cprint(f"Submission {preds.shape} saved at {savedir}", "cyan")
